@@ -42,3 +42,6 @@ next-env.d.ts
 
 # Safe configuration template only
 !.env.example
+
+# Local browser verification artifacts
+/test-results/
