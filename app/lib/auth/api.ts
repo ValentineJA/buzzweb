@@ -1,13 +1,14 @@
 import "server-only";
+import { trustedOrigins } from "./origins";
 import { adminAuth, authConfigured } from "./admin";
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 export function assertOrigin(request: Request) {
-  const expected = process.env.APP_URL;
-  if (!authConfigured() || !expected) throw new ApiError(503, "not-configured", "Sign-in is being set up. Please try again later.");
-  if (request.headers.get("origin") !== new URL(expected).origin) throw new ApiError(403, "invalid-origin", "This request could not be accepted.");
+  const expected = trustedOrigins();
+  if (!authConfigured() || !expected.length) throw new ApiError(503, "not-configured", "Sign-in is being set up. Please try again later.");
+  if (!expected.includes(request.headers.get("origin") || "")) throw new ApiError(403, "invalid-origin", "This request could not be accepted.");
   if (request.headers.get("sec-fetch-site") === "cross-site") throw new ApiError(403, "invalid-origin", "This request could not be accepted.");
 }
 export async function readJson(request: Request): Promise<Record<string, unknown>> {

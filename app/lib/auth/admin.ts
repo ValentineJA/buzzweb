@@ -1,9 +1,10 @@
 import "server-only";
+import { trustedOrigins } from "./origins";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
 export function authConfigured() {
-  return Boolean(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY && process.env.MONGODB_URI && process.env.MONGODB_DB && process.env.APP_URL);
+  return Boolean(process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY && process.env.MONGODB_URI && process.env.MONGODB_DB && trustedOrigins().length > 0);
 }
 export function adminAuth() {
   const existing = getApps().find((app) => app.name === "buzz-admin");

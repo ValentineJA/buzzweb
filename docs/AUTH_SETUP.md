@@ -82,3 +82,6 @@ Without configuration, auth pages render with a setup notice, buttons are unavai
 ## Current boundaries
 
 MFA enrollment, passkeys, SMS authentication, account deletion/deactivation, real chat transport, notification delivery, live maps, and moderation remain future work. Their existing settings remain labeled as not connected. Admin/SubAdmin roles are real server-side role data, but privileged admin product features have not been invented; use `requireRole` when adding them.
+## Vercel deployment
+
+Enable access to Vercel System Environment Variables. Authentication accepts the exact deployment and branch URLs automatically, plus the production domain on production deployments. For additional custom domains, set APP_URL to the exact HTTPS origin (no path). Local development still needs APP_URL=http://localhost:3000. Add the sign-in domain to Firebase Authentication > Settings > Authorized domains. Redeploy after changing environment variables; NEXT_PUBLIC values are compiled into the browser bundle.

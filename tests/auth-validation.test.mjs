@@ -30,3 +30,16 @@ test("password and handle input boundaries", () => {
   assert.equal(validHandle("buzz_friend"), true);
   for (const value of ["ab", "a".repeat(26), "<script>", "a.b", null]) assert.equal(validHandle(value), false);
 });
+import { trustedOrigins } from "../app/lib/auth/origins.ts";
+test("Vercel origins work without APP_URL and exclude unrelated hosts", () => {
+  const origins = trustedOrigins({ NODE_ENV: "production", VERCEL: "1", VERCEL_ENV: "production", VERCEL_URL: "buzz-build.vercel.app", VERCEL_PROJECT_PRODUCTION_URL: "buzz.example", APP_URL: "http://localhost:3000" });
+  assert.deepEqual(origins, ["https://buzz-build.vercel.app", "https://buzz.example"]);
+  assert.equal(origins.includes("https://attacker.vercel.app"), false);
+});
+test("preview deployments do not inherit production origins", () => {
+  assert.deepEqual(trustedOrigins({ VERCEL: "1", VERCEL_ENV: "preview", VERCEL_URL: "preview.vercel.app", VERCEL_PROJECT_PRODUCTION_URL: "buzz.example" }), ["https://preview.vercel.app"]);
+});
+test("invalid origins fail closed and local development can use HTTP", () => {
+  for (const APP_URL of ["invalid", "https://user:pass@buzz.example", "https://buzz.example/path", "https://buzz.example?x=1"]) assert.deepEqual(trustedOrigins({ APP_URL }), []);
+  assert.deepEqual(trustedOrigins({ APP_URL: "http://localhost:3000", NODE_ENV: "development" }), ["http://localhost:3000"]);
+});
