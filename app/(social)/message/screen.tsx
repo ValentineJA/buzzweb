@@ -1,30 +1,85 @@
 "use client";
+
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount } from "@/app/components/auth/account-provider";
 import { Empty, ErrorNote, mutate, time, useAction, useData } from "@/app/components/social/common";
-import type { Message, Person, Post, Room, Settings } from "@/app/lib/social/types";
-function NewRoom({onDone}:{onDone:(id:string)=>void}) {
- const [q,setQ]=useState(""),[members,setMembers]=useState<string[]>([]),[kind,setKind]=useState("direct");const people=useData<{people:Person[]}>("users",{q});const account=useAccount();const events=useData<{posts:Post[]}>("feed",{id:account.uid,events:"1"});const settings=useData<{settings:Settings}>("settings");const a=useAction();
- return <form className="real-card real-form" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void a.run(async()=>{const r=await mutate<{id:string}>("room-create",{kind,members,name:f.get("name")||"",eventId:f.get("eventId")||"",hours:Number(f.get("hours")||0)});onDone(r.id);});}}><h2>Bring your people together</h2><label>Conversation<select value={kind} onChange={e=>{setKind(e.target.value);setMembers([]);}}><option value="direct">Direct message</option><option value="group">Group</option><option value="party">Party room</option></select></label>{kind!=="direct"&&<label>Room name<input name="name" required maxLength={80}/></label>}
- {kind==="party"&&<><label>Your event<select name="eventId" required><option value="">Choose an event you organise</option>{events.data?.posts.map(p=><option key={p._id} value={p._id}>{p.title}</option>)}</select></label><label>Close after (hours; 0 keeps it open)<input key={settings.data?.settings.partyHours} name="hours" type="number" min={0} max={720} defaultValue={settings.data?.settings.partyHours??24}/></label><ErrorNote text={events.error}/></>}
- <label>Find people<input type="search" value={q} onChange={e=>setQ(e.target.value)}/></label><small>{members.length} selected. Invitation preferences apply.</small><ErrorNote text={people.error}/><div className="real-picker">{people.data?.people.map(p=><label className="real-check" key={p.id}><input type="checkbox" checked={members.includes(p.id)} onChange={e=>setMembers(e.target.checked?kind==="direct"?[p.id]:[...members,p.id]:members.filter(id=>id!==p.id))}/>{p.name} <small>@{p.handle}</small></label>)}</div><ErrorNote text={a.error}/><button className="real-primary" disabled={a.busy||!members.length}>Open conversation</button></form>;
+import type { Message, Person, Room } from "@/app/lib/social/types";
+
+type RoomFilter = "all" | "direct" | "group" | "events";
+
+function Initial({ name, large = false }: { name: string; large?: boolean }) {
+  return <span className={large ? "message-avatar message-avatar-large" : "message-avatar"}>{name.slice(0, 1).toUpperCase()}</span>;
 }
-function Conversation({room:r,refreshRooms}:{room:Room;refreshRooms:()=>Promise<void>}) {
- const account=useAccount();const messages=useData<{messages:Message[];closed:boolean;more:boolean}>("messages",{id:r._id},5000);const [text,setText]=useState(""),[editing,setEditing]=useState<Message|null>(null),[manage,setManage]=useState(false),[before,setBefore]=useState(""),[older,setOlder]=useState<Message[]>([]);const a=useAction(async()=>{await messages.refresh();await refreshRooms();});
- const latest=messages.data?.messages.at(-1)?._id;
- useEffect(()=>{if(latest)void mutate("read",{id:r._id}).then(refreshRooms).catch(()=>{});},[latest,r._id,refreshRooms]);
- const title=r.kind==="direct"?r.people.find(p=>p.id!==account.uid)?.name:r.name;
- const all=[...older,...(messages.data?.messages||[])].filter((m,i,a)=>a.findIndex(x=>x._id===m._id)===i);
- return <section className="real-conversation"><header className="real-card"><div className="real-row"><h2>{title}</h2><span className="real-tag">{r.kind}</span></div><small>{r.people.map(p=>p.name).join(", ")}</small>{r.expiresAt&&<p className="real-countdown">◷ {r.closed?"Closed":"Closes"} {time(r.expiresAt)}</p>}{r.kind!=="direct"&&<button onClick={()=>setManage(!manage)}>Room details</button>}
- {manage&&<div className="real-form">{r.ownerId===account.uid?<><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void a.run(()=>mutate("room-update",{id:r._id,name:f.get("name"),hours:Number(f.get("hours")||0)}));}}><label>Name<input name="name" required defaultValue={r.name} maxLength={80}/></label>{r.kind==="party"&&<label>New expiry from now (hours; 0 keeps it open)<input name="hours" type="number" min={0} max={720} defaultValue={0}/></label>}<button disabled={a.busy||r.closed}>Save room</button></form>{r.people.filter(p=>p.id!==account.uid).map(p=><div className="real-row" key={p.id}>{p.name}<button disabled={a.busy||r.closed} onClick={()=>{if(confirm(`Remove ${p.name} from this room?`))void a.run(()=>mutate("room-remove-member",{id:r._id,member:p.id}));}}>Remove</button></div>)}<button disabled={a.busy||r.closed} onClick={()=>{if(confirm("Close this room? Messages will remain readable, but no one can send more."))void a.run(()=>mutate("room-close",{id:r._id}));}}>Close room</button></>:<button disabled={a.busy} onClick={()=>{if(confirm("Leave this group?"))void a.run(()=>mutate("room-leave",{id:r._id}));}}>Leave group</button>}</div>}</header>
- <ErrorNote text={messages.error||a.error}/>{messages.loading&&<p>Loading conversation…</p>}
- {messages.data?.more&&<button disabled={a.busy||before==="end"} onClick={()=>void a.run(async()=>{const params=new URLSearchParams({resource:"messages",id:r._id,before:before||messages.data!.messages[0].createdAt});const response=await fetch(`/api/social?${params}`,{cache:"no-store"});const result=await response.json();if(!response.ok)throw Error(result.error);const list=result.messages as Message[];setOlder(v=>[...list,...v]);setBefore(result.more?list[0].createdAt:"end");})}>Load older messages</button>}
- <div className="real-bubbles" aria-live="polite">{all.length===0&&!messages.loading&&<Empty>It starts with a hello.</Empty>}{all.map(m=><article key={m._id} className={`real-bubble ${m.ownerId===account.uid?"mine":""}`}><strong>{m.author.name}</strong><p>{m.text}</p><small>{time(m.createdAt)}{m.editedAt?" · edited":""}{m.ownerId===account.uid&&m.readBy.length?" · seen":""}</small>{m.ownerId!==account.uid&&<button disabled={a.busy} onClick={()=>{const reason=prompt("Why are you reporting this message?");if(reason)void a.run(()=>mutate("report",{id:m._id,kind:"message",reason}));}}>Report</button>}{m.ownerId===account.uid&&!messages.data?.closed&&<div className="real-actions"><button onClick={()=>{setEditing(m);setText(m.text);}}>Edit</button><button disabled={a.busy} onClick={()=>{if(confirm("Delete your message?"))void a.run(()=>mutate("message-delete",{id:m._id}));}}>Delete</button></div>}</article>)}</div>
- {messages.data?.closed?<Empty>This room has closed. Your conversation stays here.</Empty>:<form className="real-message-form" onSubmit={e=>{e.preventDefault();void a.run(async()=>{await mutate(editing?"message-edit":"message-send",{id:editing?editing._id:r._id,text});setText("");setEditing(null);});}}>{editing&&<button type="button" onClick={()=>{setEditing(null);setText("");}}>Cancel editing</button>}<label>{editing?"Edit your message":"Message"}<textarea maxLength={2000} required value={text} onChange={e=>setText(e.target.value)} placeholder="Keep the good going…"/></label><button className="real-primary" disabled={a.busy||!text.trim()}>{editing?"Save edit":"Send ↑"}</button></form>}
- </section>;
+
+function RoomRow({ room, active, accountId, onSelect }: { room: Room; active: boolean; accountId: string; onSelect: () => void }) {
+  const latest = useData<{ messages: Message[] }>("messages", { id: room._id });
+  const person = room.kind === "direct" ? room.people.find(item => item.id !== accountId) : undefined;
+  const title = person?.name || room.name || "Conversation";
+  const preview = latest.data?.messages.at(-1);
+  return <button className={`message-room ${active ? "selected" : ""}`} onClick={onSelect}>
+    <Initial name={title} />
+    <span className="message-room-copy"><strong>{title}</strong><small>{preview?.text || `${room.kind === "party" ? "Event group" : room.kind} conversation`}</small></span>
+    <span className="message-room-meta"><time>{preview ? time(preview.createdAt) : time(room.updatedAt)}</time>{room.unread > 0 && <b>{room.unread}</b>}</span>
+  </button>;
 }
-function Messages(){const account=useAccount();const search=useSearchParams();const router=useRouter();const rooms=useData<{rooms:Room[]}>("rooms",{},7000);const [create,setCreate]=useState(false),[filter,setFilter]=useState("all"),[term,setTerm]=useState("");const id=search.get("room");const active=rooms.data?.rooms.find(r=>r._id===id);
- return <main className="real-page"><div className="real-heading"><div><p className="real-eyebrow">YOUR PEOPLE, IN ONE PLACE</p><h1>Good conversations.</h1></div><button className="real-primary" onClick={()=>setCreate(!create)}>{create?"Cancel":"＋ New"}</button></div>{create&&<NewRoom onDone={id=>{setCreate(false);void rooms.refresh();router.push(`/message?room=${encodeURIComponent(id)}`);}}/>}<ErrorNote text={rooms.error}/>{id?<><button onClick={()=>router.push("/message")}>← All conversations</button>{active?<Conversation key={active._id} room={active} refreshRooms={rooms.refresh}/>:<Empty>{rooms.loading?"Loading room…":"This room is unavailable or you are no longer a member."}</Empty>}</>:<><label className="real-search">Search your conversations<input value={term} onChange={e=>setTerm(e.target.value)}/></label><div className="real-tabs">{["all","direct","group","party"].map(f=><button aria-pressed={filter===f} key={f} onClick={()=>setFilter(f)}>{f}</button>)}</div>{rooms.data?.rooms.length===0&&<Empty>No conversations yet. Find someone in Explore or start a group.</Empty>}{rooms.data?.rooms.filter(r=>(filter==="all"||r.kind===filter)&&`${r.name} ${r.people.map(p=>p.name).join(" ")}`.toLowerCase().includes(term.toLowerCase())).map(r=><button className={`real-room ${r.kind==="party"?"party":""}`} key={r._id} onClick={()=>router.push(`/message?room=${encodeURIComponent(r._id)}`)}><span className="real-avatar">{r.kind==="party"?"◷":r.kind==="group"?"✦":"↗"}</span><span><strong>{r.kind==="direct"?r.people.find(p=>p.id!==account.uid)?.name:r.name}</strong><small>{r.kind} · {r.closed?"Closed":r.expiresAt?`Until ${time(r.expiresAt)}`:time(r.updatedAt)}</small></span>{r.unread>0&&<b className="real-unread">{r.unread}</b>}</button>)}</>}</main>;
+
+function Messages() {
+  const account = useAccount();
+  const router = useRouter();
+  const search = useSearchParams();
+  const rooms = useData<{ rooms: Room[] }>("rooms", {}, 7000);
+  const id = search.get("room");
+  const active = rooms.data?.rooms.find(room => room._id === id);
+  const [term, setTerm] = useState("");
+  const [filter, setFilter] = useState<RoomFilter>("all");
+  const [newRoom, setNewRoom] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [personSearch, setPersonSearch] = useState("");
+  const people = useData<{ people: Person[] }>("users", { q: personSearch });
+  const action = useAction(rooms.refresh);
+  const createRoom = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const result = await mutate<{ id: string }>("room-create", { kind: form.get("kind") || "direct", members: selectedMembers, name: form.get("name") || "" });
+    setNewRoom(false); setSelectedMembers([]); await rooms.refresh(); router.push(`/message?room=${encodeURIComponent(result.id)}`);
+  };
+  const visibleRooms = rooms.data?.rooms.filter(room => {
+    const matchesFilter = filter === "all" || (filter === "events" ? Boolean(room.eventId) || room.kind === "party" : room.kind === filter);
+    return matchesFilter && `${room.name} ${room.people.map(person => person.name).join(" ")}`.toLowerCase().includes(term.toLowerCase());
+  }) || [];
+
+  return <main className="messages-dashboard">
+    <aside className="message-sidebar">
+      <div className="message-sidebar-heading"><div><p className="real-eyebrow">YOUR PEOPLE</p><h1>Messages</h1></div><button className="real-primary message-new" onClick={() => setNewRoom(!newRoom)} aria-label="New message">＋</button></div>
+      <label className="message-search"><span>⌕</span><input value={term} onChange={event => setTerm(event.target.value)} placeholder="Search messages, people, or groups…" /></label>
+      <div className="message-filters" role="tablist" aria-label="Message filters">{(["all", "direct", "group", "events"] as RoomFilter[]).map(value => <button role="tab" key={value} aria-selected={filter === value} onClick={() => setFilter(value)}>{value === "all" ? "All" : value === "direct" ? "Direct" : value === "group" ? "Groups" : "Events"}</button>)}</div>
+      {newRoom && <form className="message-new-room" onSubmit={event => void action.run(() => createRoom(event))}><div className="message-new-heading"><h2>Start a conversation</h2><button type="button" onClick={() => setNewRoom(false)}>×</button></div><select name="kind" defaultValue="direct"><option value="direct">Direct message</option><option value="group">Group chat</option><option value="party">Event group</option></select><input name="name" placeholder="Group name (optional)" maxLength={80}/><input value={personSearch} onChange={event => setPersonSearch(event.target.value)} placeholder="Find people"/><div className="message-picker">{people.data?.people.map(person => <label key={person.id}><input type="checkbox" checked={selectedMembers.includes(person.id)} onChange={event => setSelectedMembers(event.target.checked ? [...selectedMembers, person.id] : selectedMembers.filter(member => member !== person.id))}/><span>{person.name}</span><small>@{person.handle}</small></label>)}</div><button className="real-primary" disabled={!selectedMembers.length}>Create chat</button></form>}
+      <div className="message-room-list">{rooms.loading && <p>Loading conversations…</p>}{!rooms.loading && !visibleRooms.length && <Empty>No conversations yet.</Empty>}{visibleRooms.map(room => <RoomRow key={room._id} room={room} accountId={account.uid} active={room._id === id} onSelect={() => router.push(`/message?room=${encodeURIComponent(room._id)}`)} />)}</div>
+    </aside>
+    <section className="message-conversation">{active ? <Conversation room={active} refreshRooms={rooms.refresh} /> : <div className="message-welcome"><span>✦</span><h2>Good conversations start here.</h2><p>Choose a chat or start a new one with your BUZZ people.</p><button className="real-primary" onClick={() => setNewRoom(true)}>Start a conversation</button></div>}</section>
+    <aside className="message-details">{active ? <ConversationDetails room={active} accountId={account.uid} /> : <p>Select a conversation to see details.</p>}</aside>
+  </main>;
 }
-export default function Screen(){return <Suspense fallback={<p>Loading messages…</p>}><Messages/></Suspense>;}
+
+function ConversationDetails({ room, accountId }: { room: Room; accountId: string }) {
+  const person = room.kind === "direct" ? room.people.find(item => item.id !== accountId) : undefined;
+  const title = person?.name || room.name || "Conversation";
+  return <><Initial name={title} large /><h2>{title}</h2><p>{room.kind === "party" ? "Event group" : room.kind} · {room.people.length} members</p><div className="message-detail-actions"><button>☎<small>Audio</small></button><button>▣<small>Video</small></button><button>▦<small>Event</small></button></div><div className="message-detail-list"><button>ⓘ <span>Group info</span><b>›</b></button><button>♧ <span>Members ({room.people.length})</span><b>›</b></button><button>▧ <span>Shared media</span><b>›</b></button><button>▣ <span>Events</span><b>›</b></button><button>⌁ <span>Pinned messages</span><b>›</b></button><button>◔ <span>Mute notifications</span><i className="message-toggle" /></button><button className="leave-chat">↪ <span>Leave conversation</span></button></div><div className="message-member-list">{room.people.slice(0, 6).map(member => <span key={member.id}><Initial name={member.name}/><small>{member.name}</small></span>)}</div></>;
+}
+
+function Conversation({ room, refreshRooms }: { room: Room; refreshRooms: () => Promise<void> }) {
+  const account = useAccount();
+  const messages = useData<{ messages: Message[]; closed: boolean }>("messages", { id: room._id }, 5000);
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState<Message | null>(null);
+  const action = useAction(async () => { await messages.refresh(); await refreshRooms(); });
+  const latest = messages.data?.messages.at(-1)?._id;
+  useEffect(() => { if (latest) void mutate("read", { id: room._id }).then(refreshRooms).catch(() => {}); }, [latest, refreshRooms, room._id]);
+  const send = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); await mutate(editing ? "message-edit" : "message-send", { id: editing ? editing._id : room._id, text }); setText(""); setEditing(null); await messages.refresh(); };
+  const person = room.kind === "direct" ? room.people.find(item => item.id !== account.uid) : undefined;
+  const title = person?.name || room.name || "Conversation";
+  return <><header className="conversation-header"><button className="conversation-back" onClick={() => window.history.back()} aria-label="Back">‹</button><Initial name={title}/><div><h2>{title}</h2><p>{room.kind === "party" ? "Event group" : room.kind} · {room.people.length} members</p></div><div className="conversation-actions"><button aria-label="Start video call">▣</button><button aria-label="Start audio call">☎</button><button aria-label="Search chat">⌕</button><button aria-label="More actions">⋮</button></div></header><ErrorNote text={messages.error || action.error}/><div className="conversation-messages">{messages.data?.messages.length ? <div className="message-day-pill">Today</div> : null}{!messages.loading && !messages.data?.messages.length && <Empty>It starts with a hello.</Empty>}{messages.data?.messages.map(message => <article className={`chat-bubble ${message.ownerId === account.uid ? "mine" : ""}`} key={message._id}><div className="chat-sender"><Initial name={message.author.name}/><strong>{message.author.name}</strong><small>{time(message.createdAt)}</small></div><p>{message.text}</p><small className="chat-time">{message.editedAt ? "Edited · " : ""}{message.ownerId === account.uid ? "Delivered" : ""}</small>{message.ownerId === account.uid && <div className="chat-message-actions"><button onClick={() => { setEditing(message); setText(message.text); }}>Edit</button><button onClick={() => void action.run(() => mutate("message-delete", { id: message._id }))}>Delete</button></div>}</article>)}</div>{messages.data?.closed ? <Empty>This room is closed.</Empty> : <form className="message-composer" onSubmit={event => void action.run(() => send(event))}>{editing && <button type="button" className="editing-pill" onClick={() => { setEditing(null); setText(""); }}>Editing · cancel</button>}<button type="button" className="composer-tool" aria-label="Add attachment">＋</button><input value={text} onChange={event => setText(event.target.value)} placeholder={editing ? "Edit your message…" : "Type a message…"} required maxLength={2000}/><button type="button" className="composer-tool" aria-label="Add emoji">☺</button><button type="button" className="composer-tool composer-secondary" aria-label="Add image">▧</button><button type="button" className="composer-tool composer-secondary" aria-label="Add file">⌕</button><button className="real-primary send-message" disabled={action.busy} aria-label="Send message">➤</button></form>}</>;
+}
+
+export default function Screen() { return <Suspense fallback={<p className="real-page">Loading messages…</p>}><Messages /></Suspense>; }
